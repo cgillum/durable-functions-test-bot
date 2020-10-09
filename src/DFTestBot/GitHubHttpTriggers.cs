@@ -32,11 +32,6 @@ namespace DFTestBot
         {
             log.LogInformation($"Received a webhook: {req.GetDisplayUrl()}");
 
-            if (!GitHubClient.IsConfigured)
-            {
-                throw new InvalidOperationException("The GitHub client has not been properly configured!");
-            }
-
             if (!req.ContentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
             {
                 return new BadRequestObjectResult("Expected application/json");
@@ -56,7 +51,7 @@ namespace DFTestBot
                 }
             }
 
-            if (json.issue.pull_request == null)
+            if (json?.issue?.pull_request == null)
             {
                 return new BadRequestObjectResult("Not a pull request comment");
             }
@@ -73,13 +68,15 @@ namespace DFTestBot
             // TODO: We need to be more careful about how we parse this. For example, let's require that /DFTest must
             //       be at the beginning of a line and not somewhere in the middle.
             // TODO: We should support multiple tests runs in a single comment at some point.
-            int commandStartIndex = commentBody.IndexOf(CommandPrefix, StringComparison.OrdinalIgnoreCase);
-            if (commandStartIndex < 0 || commentBody.Contains("Durable Functions Test Bot"))
+            
+            bool startsWithDFTest = commentBody.StartsWith(CommandPrefix);
+            if (!startsWithDFTest || commentBody.Contains("Durable Functions Test Bot"))
             {
                 // Ignore unrelated comments or comments that come from the bot (like the help message)
                 return new OkObjectResult($"No commands detected");
             }
 
+            int commandStartIndex = commentBody.IndexOf(CommandPrefix, StringComparison.OrdinalIgnoreCase);
             string command = commentBody.Substring(commandStartIndex + CommandPrefix.Length);
             if (!TryParseCommand(command, out string friendlyTestName, out TestDescription testInfo, out string testParameters, out string errorMessage))
             {

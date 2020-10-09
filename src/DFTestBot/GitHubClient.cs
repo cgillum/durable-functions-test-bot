@@ -2,11 +2,16 @@
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 using System;
+using System.IdentityModel.Tokens.Jwt;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Tokens;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -14,14 +19,12 @@ namespace DFTestBot
 {
     class GitHubClient
     {
-        static readonly string GitHubOAuthToken;
         static readonly HttpClient HttpClient;
         static readonly bool GitHubCommentsDisabled = false;
+        static readonly string PathToPem = "C:\\Users\\VABACHU\\Documents\\privatekey.pem";
 
         static GitHubClient()
         {
-            GitHubOAuthToken = Environment.GetEnvironmentVariable("GITHUB_OAUTH_TOKEN");
-
             string gitHubCommentsEnabled = Environment.GetEnvironmentVariable("DISABLE_GITHUB_COMMENTS");
             if (!string.IsNullOrEmpty(gitHubCommentsEnabled))
             {
@@ -30,10 +33,17 @@ namespace DFTestBot
 
             HttpClient = new HttpClient();
             HttpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("DFTestBot", "0.1.0"));
-            HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("token", GitHubOAuthToken);
+            HttpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         }
 
-        internal static bool IsConfigured => !string.IsNullOrEmpty(GitHubOAuthToken);
+        internal static async Task RefreshAccessToken()
+        {
+            string jwt = GetJWTFromPrivateKey(PathToPem);
+            HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
+            string accessTokensUrl = await GetAccessTokensUrl(jwt);
+            string accessToken = await GetAccessToken(accessTokensUrl);
+            HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        }
 
         public static async Task PostCommentAsync(
             Uri commentApiUrl,
@@ -52,7 +62,13 @@ namespace DFTestBot
                 };
 
                 using HttpResponseMessage response = await HttpClient.SendAsync(request);
-                if (!response.IsSuccessStatusCode)
+
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    await RefreshAccessToken();
+                    await PostCommentAsync(commentApiUrl, markdownComment, log);
+                }
+                else if (!response.IsSuccessStatusCode)
                 {
                     int statusCode = (int)response.StatusCode;
                     string details = await response.Content.ReadAsStringAsync();
@@ -80,5 +96,121 @@ namespace DFTestBot
 
             return content;
         }
+        
+        static string GetJWTFromPrivateKey(string pathToPem)
+        {
+            string privateKeyPem = File.ReadAllText(pathToPem);
+
+            // keeping only the payload of the key
+            privateKeyPem = privateKeyPem.Replace("-----BEGIN RSA PRIVATE KEY-----", "");
+            privateKeyPem = privateKeyPem.Replace("-----END RSA PRIVATE KEY-----", "");
+
+            byte[] privateKeyRaw = Convert.FromBase64String(privateKeyPem);
+
+            // creating the RSA key 
+            RSACryptoServiceProvider provider = new RSACryptoServiceProvider();
+
+            provider.ImportRSAPrivateKey(new ReadOnlySpan<byte>(privateKeyRaw), out _);
+
+            RsaSecurityKey rsaSecurityKey = new RsaSecurityKey(provider);
+
+            // Generating the token 
+            var now = DateTime.UtcNow;
+
+            var claims = new[] {
+                new Claim(JwtRegisteredClaimNames.Iat, ToUnixEpochDate(now).ToString(), ClaimValueTypes.Integer64),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+            };
+
+            var handler = new JwtSecurityTokenHandler();
+
+            var token = new JwtSecurityToken
+            (
+                issuer: "83022", //App ID
+                audience: "https://api.github.com",
+                claims: claims,
+                notBefore: now,
+                expires: now.AddMinutes(10), // expires in 10 minutes
+                new SigningCredentials(rsaSecurityKey, SecurityAlgorithms.RsaSha256)
+            );
+
+            string installationToken = handler.WriteToken(token);
+            return installationToken;
+        }
+
+        static async Task<string> GetAccessTokensUrl(string jwt)
+        {
+            string installationUrl = "https://api.github.com/app/installations";
+
+            var request = new HttpRequestMessage(HttpMethod.Get, installationUrl);
+            HttpResponseMessage response = await HttpClient.GetAsync(installationUrl);
+
+            if ((int)response.StatusCode > 201)
+            {
+                return response.StatusCode.ToString();
+            }
+
+            dynamic json;
+            using (var reader = new StreamReader(await response.Content.ReadAsStreamAsync(), Encoding.UTF8))
+            {
+                string content = await reader.ReadToEndAsync();
+                try
+                {
+                    JArray jsonArray = JArray.Parse(content);
+                    json = JObject.Parse(jsonArray[0].ToString());
+                }
+                catch (JsonReaderException e)
+                {
+                    throw new InvalidOperationException($"Invalid JSON: {e.Message}");
+                }
+            }
+
+            if (json?.access_tokens_url == null)
+            {
+                throw new InvalidOperationException("Invalid access_tokens_url.");
+            }
+
+            string accessTokenUrl = json?.access_tokens_url;
+
+            return accessTokenUrl;
+        }
+
+        static async Task<string> GetAccessToken(string accessTokensUrl)
+        {
+            string installationAccessTokenUrl = accessTokensUrl; // "https://api.github.com/app/installations/12133425/access_tokens";
+
+            var request = new HttpRequestMessage(HttpMethod.Post, installationAccessTokenUrl);
+            HttpResponseMessage response = await HttpClient.SendAsync(request);
+
+            if ((int)response.StatusCode > 201)
+            {
+                return response.StatusCode.ToString();
+            }
+
+            dynamic json;
+            using (var reader = new StreamReader(await response.Content.ReadAsStreamAsync(), Encoding.UTF8))
+            {
+                string content = await reader.ReadToEndAsync();
+                try
+                {
+                    json = JObject.Parse(content);
+                }
+                catch (JsonReaderException e)
+                {
+                    throw new InvalidOperationException($"Invalid JSON: {e.Message}");
+                }
+            }
+
+            if (json?.token == null)
+            {
+                throw new InvalidOperationException("Invalid token");
+            }
+
+            string token = json?.token;
+
+            return token;
+        }
+
+        public static long ToUnixEpochDate(DateTime date) => new DateTimeOffset(date).ToUniversalTime().ToUnixTimeSeconds();
     }
 }
