@@ -76,8 +76,25 @@ namespace DFTestBot
                 return new OkObjectResult($"No commands detected");
             }
 
+            // get information about environment parameters if the user added any custom configuration
+            string appPlanType = commentBody.Split(' ')[1];
+            string skuType = "";
+            string minCount = "";
+            string maxCount = "";
+            if (string.Equals(appPlanType, "ElasticPremium"))
+            {
+                ParsePremiumPlanParameters(commentBody, out string sku, out string minCountValue, out string maxCountValue);
+                skuType = sku;
+                minCount = minCountValue;
+                maxCount = maxCountValue;
+            }
+
+            ParseOSTypeAndFunctionsVersion(commentBody, out string OSValue, out string functionsVersion);
+
+            // string testCommand = "run";
+            // int commandIndex = commentBody.IndexOf(testCommand);
             int commandStartIndex = commentBody.IndexOf(CommandPrefix, StringComparison.OrdinalIgnoreCase);
-            string command = commentBody.Substring(commandStartIndex + CommandPrefix.Length);
+            string command = commentBody.Substring(commandStartIndex + CommandPrefix.Length); // commentBody.Substring(commandIndex);
             if (!TryParseCommand(command, out string friendlyTestName, out TestDescription testInfo, out string testParameters, out string errorMessage))
             {
                 await GitHubClient.PostCommentAsync(commentApiUrl, errorMessage, log);
@@ -105,18 +122,34 @@ namespace DFTestBot
 
             // NOTE: site names must be 60 characters or less, leaving ~24 characters for test names
             string issueId = json.issue.number;
-            string appName = $"dftest-{friendlyTestName}-pr{issueId}-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4)}";
+            string dftestWithFriendlyName = $"dftest-{friendlyTestName}";
+            string prNum = $"pr{issueId}";
+            string dateTime = $"{DateTime.UtcNow:yyyyMMdd}";
+            string guid = Guid.NewGuid().ToString().Substring(0, 4);
+            
+            string appName = $"{dftestWithFriendlyName}-{prNum}-{dateTime}-{guid}";
+            string resourceGroupName = appName + "-rg";
+            string storageAccountName = $"dftest{dateTime}{guid}sa";
+            string appPlanName = appName + "-plan";
 
             var parameters = new TestParameters
             {
                 SubscriptionId = TestAppSubscriptionId,
-                ResourceGroup = TestAppResourceGroup,
+                ResourceGroup = resourceGroupName,
+                StorageAccount = storageAccountName,
                 GitHubCommentApiUrl = commentApiUrl,
                 GitHubBranch = branchName,
                 AppName = appName,
+                AppPlanName = appPlanName,
                 TestName = testInfo.StarterFunctionName,
                 Parameters = testParameters,
                 DetectorName = testInfo.AppLensDetector,
+                AppPlanType = appPlanType,
+                Sku = skuType,
+                MinInstanceCount = minCount,
+                MaxInstanceCount = maxCount,
+                OSType = OSValue,
+                FunctionsVersion = functionsVersion
             };
 
             string instanceId = $"DFTestBot-PR{issueId}-{DateTime.UtcNow:yyyyMMddhhmmss}";
@@ -124,11 +157,70 @@ namespace DFTestBot
             sb.Append($"I've started a new deployment orchestration with ID **{instanceId}** that will validate the changes in this PR. ");
             sb.AppendLine($"If the build succeeds, the orchestration will create an app named **{appName}** and run the _{friendlyTestName}_ test using your custom build.");
             sb.AppendLine();
+            sb.AppendLine("These are the configuration options for the build:");
+            if (string.Equals(appPlanType, "ElasticPremium"))
+            {
+                sb.AppendLine("**Elastic Premium Plan**");
+                sb.AppendLine($"Sku = **{skuType}**, Minimum instance count = **{minCount}**, MaximumInstanceCount = **{maxCount}**");
+            }
+            else
+            {
+                sb.AppendLine("Consumption Plan");
+            }
+            sb.AppendLine($"OS = **{OSValue}**, Functions version = **{functionsVersion}**");
+
+            sb.AppendLine();
             sb.AppendLine("I'll report back when I have status updates.");
 
             await GitHubClient.PostCommentAsync(commentApiUrl, sb.ToString(), log);
             log.LogInformation("Test scheduled successfully!");
             return new OkObjectResult("Test scheduled successfully!");
+        }
+
+        private static void ParsePremiumPlanParameters(string commentBody, out string sku, out string minCountValue, out string maxCountValue)
+        {
+            int skuValueIndex = commentBody.IndexOf("sku");
+            int minCountIndex = commentBody.IndexOf("minCount");
+            int maxCountIndex = commentBody.IndexOf("maxCount");
+
+            sku = "EP1";
+            minCountValue = "1";
+            maxCountValue = "3";
+
+            if (skuValueIndex >= 0)
+            {
+                sku = commentBody.Substring(skuValueIndex).Split(' ')[1];
+            }
+
+            if (minCountIndex >= 0)
+            {
+                minCountValue = commentBody.Substring(minCountIndex).Split(' ')[1];
+            }
+
+            if (maxCountIndex >= 0)
+            {
+                maxCountValue = commentBody.Substring(maxCountIndex).Split(' ')[1];
+            }
+        }
+
+        private static void ParseOSTypeAndFunctionsVersion(string commentBody, out string oSType, out string functionsVersion)
+        {
+            int osTypeIndex = commentBody.IndexOf("os");
+            oSType = "Windows";
+
+            if (osTypeIndex >= 0)
+            {
+                oSType = commentBody.Substring(osTypeIndex).Split(' ')[1];
+            }
+
+            // get functions version
+            int functionsVersionValueIndex = commentBody.IndexOf("functionsVersion");
+            functionsVersion = "3";
+
+            if (functionsVersionValueIndex >= 0)
+            {
+                functionsVersion = commentBody.Substring(functionsVersionValueIndex).Split(' ')[1];
+            }
         }
 
         static bool TryParseCommand(
@@ -148,7 +240,11 @@ namespace DFTestBot
                 return false;
             }
 
-            if (parts.Length < 2 || !parts[0].Equals("run", StringComparison.OrdinalIgnoreCase))
+            string runString = "run";
+            int runIndex = input.IndexOf(runString);
+
+            // if (parts.Length < 2 || !parts[0].Equals("run", StringComparison.OrdinalIgnoreCase))
+            if (parts.Length < 2 || runIndex < 0)
             {
                 testName = null;
                 testInfo = null;
@@ -156,7 +252,7 @@ namespace DFTestBot
                 errorMessage = GetSyntaxHelp();
                 return false;
             }
-
+            parts = input.Substring(runIndex).Split(' ');
             testName = parts[1];
             testParameters = string.Join('&', parts[2..]);
             if (SupportedTests.TryGetTestInfo(testName, out testInfo))
@@ -173,7 +269,13 @@ namespace DFTestBot
 
         static string GetSyntaxHelp()
         {
-            return $"The syntax for commands is: `{CommandPrefix.Trim()} run <TestName> <Param1> <Param2> ...`";
+            var sb = new StringBuilder();
+            sb.AppendLine($"The syntax for a test with a Consumption plan is: `{CommandPrefix.Trim()} Consumption os <os type> functionsVersion <version> run <TestName> <Param1> <Param2> ...`");
+            sb.AppendLine($"Example: `{CommandPrefix.Trim()} Consumption os Windows functionsVersion 3 run HelloSequence`");
+            sb.AppendLine();
+            sb.AppendLine($"The syntax for a test with an Elastic Premium plan is: `{CommandPrefix.Trim()} ElasticPremium sku <skuValue> minCount <count> maxCount <count> os <os type> functionsVersion <version> run <TestName> <Param1> <Param2> ...`");
+            sb.AppendLine($"Example: `{CommandPrefix.Trim()} ElasticPremium sku EP1 minCount 1 maxCount 3 os Windows functionsVersion 3 run HelloSequence`");
+            return sb.ToString();
         }
 
         static string GetTestNameHelp()

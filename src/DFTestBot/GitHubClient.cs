@@ -80,6 +80,11 @@ namespace DFTestBot
         public static async Task<JObject> GetPullRequestInfoAsync(Uri pullRequestApiUrl)
         {
             using HttpResponseMessage response = await HttpClient.GetAsync(pullRequestApiUrl);
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                await RefreshAccessToken();
+                await GetPullRequestInfoAsync(pullRequestApiUrl);
+            }
             string content = await GetResponseContentOrThrowAsync(response);
             return JObject.Parse(content);
         }

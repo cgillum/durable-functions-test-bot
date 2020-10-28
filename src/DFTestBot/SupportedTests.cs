@@ -29,6 +29,13 @@ namespace DFTestBot
                     StarterFunctionName = "StartFanOutFanIn",
                     IsEnabled = false,
                 },
+                ["HelloSequence"] = new TestDescription
+                {
+                    Description = "Runs a Hello cities orchestration. Example: `/DFTest run HelloSequence`.",
+                    AppLensDetector = "",
+                    StarterFunctionName = "orchestrators/E1_HelloSequence",
+                    IsEnabled = true,
+                },
             };
         }
 

@@ -31,12 +31,84 @@ namespace DFTestBot
             DateTime startTimeUtc = context.CurrentUtcDateTime;
             TestParameters testParameters = context.GetInput<TestParameters>();
 
-            // Create a new function app
-            if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewFunctionApp", context, log, testParameters))
+            // Create a new resource group
+            if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewResourceGroup", context, log, testParameters))
             {
-                string message = $"Failed to create a new function app! 💣 Check the internal deployment service logs for more details.";
+                string message = $"Failed to create a new resource group! 💣 Check the internal deployment service logs for more details.";
                 await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
                 throw new Exception(message);
+            }
+
+            // Check if the resource group was created and ready to use
+            while (!await TryCallDeploymentServiceHttpApiAsync("api/CheckResourceGroupStatus", context, log, testParameters))
+            {
+                // Retry every 10 seconds
+                await SleepAsync(context, TimeSpan.FromSeconds(10));
+            }
+
+            await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, "Successfully created a new resource group."));
+
+            // Create storage account
+            if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewStorageAccount", context, log, testParameters))
+            {
+                string message = $"Failed to create a new storage account! 💣 Check the internal deployment service logs for more details.";
+                await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                throw new Exception(message);
+            }
+
+            // Check if the storage account was created and ready to use
+            while (!await TryCallDeploymentServiceHttpApiAsync("api/CheckStorageAccountStatus", context, log, testParameters))
+            {
+                // Retry every 10 seconds
+                await SleepAsync(context, TimeSpan.FromSeconds(10));
+            }
+
+            await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, "Successfully created a new storage account."));
+
+            if (string.Equals(testParameters.AppPlanType, "ElasticPremium"))
+            {
+                // Create a new function app plan
+                if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewFunctionAppPlan", context, log, testParameters))
+                {
+                    string message = $"Failed to create a new function app plan! 💣 Check the internal deployment service logs for more details.";
+                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                    throw new Exception(message);
+                }
+
+                // Check if the function app plan was created and ready to use
+                while (!await TryCallDeploymentServiceHttpApiAsync("api/CheckFunctionAppPlanStatus", context, log, testParameters))
+                {
+                    // Retry every 10 seconds
+                    await SleepAsync(context, TimeSpan.FromSeconds(10));
+                }
+
+                await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, "Successfully created a new function app plan."));
+
+                // Create a new function app with plan
+                if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewFunctionAppWithPlan", context, log, testParameters))
+                {
+                    string message = $"Failed to create a new function app! 💣 Check the internal deployment service logs for more details.";
+                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                    throw new Exception(message);
+                }
+                else
+                {
+                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, "Successfully created a new function app on an existing plan."));
+                }
+            }
+            else
+            {
+                // Create a new function app
+                if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewFunctionApp", context, log, testParameters))
+                {
+                    string message = $"Failed to create a new function app! 💣 Check the internal deployment service logs for more details.";
+                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                    throw new Exception(message);
+                }
+                else
+                {
+                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, "Successfully created a new function app."));
+                }
             }
 
             try
@@ -80,7 +152,8 @@ namespace DFTestBot
                     {
                         // There is a new status update - post it back to the PR thread.
                         log.LogInformation($"Current test status: {currentCustomStatus}");
-                        await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, currentCustomStatus));
+                        // TODO: look at if this post comment is necessary
+                        // await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, currentCustomStatus));
                         previousCustomStatus = currentCustomStatus;
                     }
 
@@ -115,10 +188,17 @@ namespace DFTestBot
                 string resourceGroup = testParameters.ResourceGroup;
                 string appName = testParameters.AppName;
                 string detectorName = testParameters.DetectorName;
-                string link = $"https://applens.azurewebsites.net/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.Web/sites/{appName}/detectors/{detectorName}?startTime={startTime}&endTime={endTime}";
+
+                // TODO: finish setting up applens detector
+                // If the detector name is empty, then redirect to applens home page
+                string link = string.IsNullOrEmpty(detectorName)
+                    ? $"https://applens.azurewebsites.net/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.Web/sites/{appName}/home/category?startTime={startTime}&endTime={endTime}"
+                    : $"https://applens.azurewebsites.net/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.Web/sites/{appName}/detectors/{detectorName}?startTime={startTime}&endTime={endTime}";
 
                 finalMessage += Environment.NewLine + Environment.NewLine + $"You can view more detailed results in [AppLens]({link}) (Microsoft internal). 🔗📈";
+                await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, finalMessage));
 
+                /*
                 TimeSpan cleanupInterval = TimeSpan.FromHours(1);
                 DateTime cleanupTime = context.CurrentUtcDateTime.Add(cleanupInterval);
                 finalMessage += Environment.NewLine + Environment.NewLine + $"The test app **{appName}** will be deleted at {cleanupTime:yyyy-MM-dd hh:mm:ss} UTC.";
@@ -127,6 +207,7 @@ namespace DFTestBot
 
                 log.LogInformation($"Sleeping until {cleanupTime:yyyy-MM-dd hh:mm:ss} UTC to delete the test function app.");
                 await context.CreateTimer(cleanupTime, CancellationToken.None);
+                */
             }
             catch (Exception)
             {
@@ -136,7 +217,9 @@ namespace DFTestBot
             }
             finally
             {
-                // TODO: Consider delaying the deletion to allow for investigation
+                /*   
+                // TODO: add functionality to delete the resource group when the PR is merged or closed
+                // TODO: Delete the resource group
 
                 // Any intermediate failures should result in an automatic cleanup
                 log.LogInformation($"Deleting the test function app, {testParameters.AppName}.");
@@ -149,7 +232,9 @@ namespace DFTestBot
 
                 string cleanupSuccessMessage = $"The test app {testParameters.AppName} has been deleted. Thanks for using the DFTest bot!";
                 await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, cleanupSuccessMessage));
+                */
             }
+
         }
 
         static async Task<bool> TryCallDeploymentServiceHttpApiAsync(
