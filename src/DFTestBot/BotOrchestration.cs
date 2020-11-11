@@ -35,7 +35,7 @@ namespace DFTestBot
             if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewResourceGroup", context, log, testParameters))
             {
                 string message = $"Failed to create a new resource group! 💣 Check the internal deployment service logs for more details.";
-                await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, message));
                 throw new Exception(message);
             }
 
@@ -46,13 +46,13 @@ namespace DFTestBot
                 await SleepAsync(context, TimeSpan.FromSeconds(10));
             }
 
-            await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, "Successfully created a new resource group."));
+            await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, "Successfully created a new resource group."));
 
             // Create storage account
             if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewStorageAccount", context, log, testParameters))
             {
                 string message = $"Failed to create a new storage account! 💣 Check the internal deployment service logs for more details.";
-                await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, message));
                 throw new Exception(message);
             }
 
@@ -63,7 +63,7 @@ namespace DFTestBot
                 await SleepAsync(context, TimeSpan.FromSeconds(10));
             }
 
-            await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, "Successfully created a new storage account."));
+            await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, "Successfully created a new storage account."));
 
             if (string.Equals(testParameters.AppPlanType, "ElasticPremium"))
             {
@@ -71,7 +71,7 @@ namespace DFTestBot
                 if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewFunctionAppPlan", context, log, testParameters))
                 {
                     string message = $"Failed to create a new function app plan! 💣 Check the internal deployment service logs for more details.";
-                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                    await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, message));
                     throw new Exception(message);
                 }
 
@@ -82,18 +82,18 @@ namespace DFTestBot
                     await SleepAsync(context, TimeSpan.FromSeconds(10));
                 }
 
-                await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, "Successfully created a new function app plan."));
+                await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, "Successfully created a new function app plan."));
 
                 // Create a new function app with plan
                 if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewFunctionAppWithPlan", context, log, testParameters))
                 {
                     string message = $"Failed to create a new function app! 💣 Check the internal deployment service logs for more details.";
-                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                    await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, message));
                     throw new Exception(message);
                 }
                 else
                 {
-                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, "Successfully created a new function app on an existing plan."));
+                    await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, "Successfully created a new function app on an existing plan."));
                 }
             }
             else
@@ -102,12 +102,12 @@ namespace DFTestBot
                 if (!await TryCallDeploymentServiceHttpApiAsync("api/CreateNewFunctionApp", context, log, testParameters))
                 {
                     string message = $"Failed to create a new function app! 💣 Check the internal deployment service logs for more details.";
-                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                    await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, message));
                     throw new Exception(message);
                 }
                 else
                 {
-                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, "Successfully created a new function app."));
+                    await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, "Successfully created a new function app."));
                 }
             }
 
@@ -123,7 +123,7 @@ namespace DFTestBot
                     (responseJson) => managementUrls = JsonConvert.DeserializeObject<HttpManagementPayload>(responseJson)))
                 {
                     string message = $"Failed to deploy the test app! 💣 Check the internal deployment service logs for more details.";
-                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                    await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, message));
                     throw new Exception(message);
                 }
 
@@ -131,7 +131,7 @@ namespace DFTestBot
                 if (managementUrls == null || string.IsNullOrEmpty(managementUrls.StatusQueryGetUri))
                 {
                     string message = $"The deployment service API call succeeded but returned an unexpected response. Check the logs for details.";
-                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                    await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, message));
                     throw new Exception(message);
                 }
 
@@ -139,7 +139,7 @@ namespace DFTestBot
                 if (status == null)
                 {
                     string message = $"The test was scheduled but still hasn't started! Giving up. 😞";
-                    await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                    await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, message));
                     throw new Exception(message);
                 }
 
@@ -196,7 +196,7 @@ namespace DFTestBot
                     : $"https://applens.azurewebsites.net/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.Web/sites/{appName}/detectors/{detectorName}?startTime={startTime}&endTime={endTime}";
 
                 finalMessage += Environment.NewLine + Environment.NewLine + $"You can view more detailed results in [AppLens]({link}) (Microsoft internal). 🔗📈";
-                await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, finalMessage));
+                await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, finalMessage));
 
                 /*
                 TimeSpan cleanupInterval = TimeSpan.FromHours(1);
@@ -212,7 +212,7 @@ namespace DFTestBot
             catch (Exception)
             {
                 string message = $"An unexpected failure occurred! 💣 Unfortunately, we can't continue the test run and the test app will be deleted. 😞";
-                await context.CallActivityAsync(nameof(PostGitHubComment), (testParameters.GitHubCommentApiUrl, message));
+                await context.CallActivityAsync(nameof(PatchGitHubComment), (testParameters.GitHubCommentIdApiUrl, message));
                 throw;
             }
             finally
@@ -272,6 +272,22 @@ namespace DFTestBot
         {
             return GitHubClient.PostCommentAsync(
                 input.commentApiUrl,
+                input.markdownMessage,
+                log);
+        }
+
+        [FunctionName(nameof(PatchGitHubComment))]
+        public static async Task PatchGitHubComment([ActivityTrigger] (Uri commentIdApiUrl, string markdownMessage) input, ILogger log)
+        {
+            // get comment's body
+            string currentCommentBody = await GitHubClient.GetCommentBodyAsync(
+                input.commentIdApiUrl,
+                log);
+
+            // update the comment with the new message
+            await GitHubClient.PatchCommentAsync(
+                input.commentIdApiUrl,
+                currentCommentBody,
                 input.markdownMessage,
                 log);
         }

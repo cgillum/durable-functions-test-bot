@@ -17,21 +17,21 @@ namespace DFTestBot
             {
                 ["ManySequences"] = new TestDescription
                 {
-                    Description = @"Runs `count` ""Hello cities"" sequencial orchestrations in parallel. Example: `/DFTest run ManySequences count=10000`.",
+                    Description = @"Runs `count` ""Hello cities"" sequencial orchestrations in parallel. Example: `/DFTest run ManySequences count=10000 end`.",
                     AppLensDetector = "DurableFunctions_ManySequencesTest",
                     StarterFunctionName = "StartManySequences",
                     IsEnabled = true,
                 },
                 ["FanOutFanIn"] = new TestDescription
                 {
-                    Description = "Runs a single orchestration that fans out to `count` number of activity functions. Example: `/DFTest run FanOutFanIn count=10000`.",
+                    Description = "Runs a single orchestration that fans out to `count` number of activity functions. Example: `/DFTest run FanOutFanIn count=10000 end`.",
                     AppLensDetector = "DurableFunctions_FanOutTest",
                     StarterFunctionName = "StartFanOutFanIn",
                     IsEnabled = false,
                 },
                 ["HelloSequence"] = new TestDescription
                 {
-                    Description = "Runs a Hello cities orchestration. Example: `/DFTest run HelloSequence`.",
+                    Description = "Runs a Hello cities orchestration. Example: `/DFTest run HelloSequence end`.",
                     AppLensDetector = "",
                     StarterFunctionName = "orchestrators/E1_HelloSequence",
                     IsEnabled = true,

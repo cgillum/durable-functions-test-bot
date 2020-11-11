@@ -55,20 +55,21 @@ namespace DFTestBot
             {
                 return new BadRequestObjectResult("Not a pull request comment");
             }
-            else if (json.action != "created")
+            else if (json.action != "created" && json.action != "edited")
             {
-                return new BadRequestObjectResult($"Not a new comment (action = '{json.action}')");
+                return new BadRequestObjectResult($"Not a new/edited comment (action = '{json.action}')");
             }
 
             string commentBody = json.comment.body;
             log.LogInformation($"Comment: {commentBody}");
 
             Uri commentApiUrl = new Uri((string)json.issue.comments_url);
+            Uri commentIdApiUrl = new Uri((string)json.comment.url);
 
             // TODO: We need to be more careful about how we parse this. For example, let's require that /DFTest must
             //       be at the beginning of a line and not somewhere in the middle.
             // TODO: We should support multiple tests runs in a single comment at some point.
-            
+
             bool startsWithDFTest = commentBody.StartsWith(CommandPrefix);
             if (!startsWithDFTest || commentBody.Contains("Durable Functions Test Bot"))
             {
@@ -97,7 +98,8 @@ namespace DFTestBot
             string command = commentBody.Substring(commandStartIndex + CommandPrefix.Length); // commentBody.Substring(commandIndex);
             if (!TryParseCommand(command, out string friendlyTestName, out TestDescription testInfo, out string testParameters, out string errorMessage))
             {
-                await GitHubClient.PostCommentAsync(commentApiUrl, errorMessage, log);
+                //await GitHubClient.PostCommentAsync(commentApiUrl, errorMessage, log);
+                await GitHubClient.PatchCommentAsync(commentIdApiUrl, commentBody, errorMessage, log);
                 return new OkObjectResult($"Replied with instructions");
             }
 
@@ -119,6 +121,7 @@ namespace DFTestBot
             Uri pullRequestUrl = new Uri((string)json.issue.pull_request.url);
             dynamic pullRequestJson = await GitHubClient.GetPullRequestInfoAsync(pullRequestUrl);
             string branchName = pullRequestJson.head.@ref;
+            string commentAction = json.action;
 
             // NOTE: site names must be 60 characters or less, leaving ~24 characters for test names
             string issueId = json.issue.number;
@@ -138,6 +141,8 @@ namespace DFTestBot
                 ResourceGroup = resourceGroupName,
                 StorageAccount = storageAccountName,
                 GitHubCommentApiUrl = commentApiUrl,
+                GitHubCommentIdApiUrl = commentIdApiUrl,
+                GitHubCommentAction = commentAction,
                 GitHubBranch = branchName,
                 AppName = appName,
                 AppPlanName = appPlanName,
@@ -172,7 +177,21 @@ namespace DFTestBot
             sb.AppendLine();
             sb.AppendLine("I'll report back when I have status updates.");
 
-            await GitHubClient.PostCommentAsync(commentApiUrl, sb.ToString(), log);
+            // await GitHubClient.PostCommentAsync(commentApiUrl, sb.ToString(), log);
+            string currentCommentBody;
+            if (commentAction.Equals("edited"))
+            {
+                // start a new test run without the logs from previous runs
+                string endString = "end";
+                int endIndex = commentBody.IndexOf(endString);
+                currentCommentBody = commentBody.Substring(commandStartIndex, endIndex - commandStartIndex);
+            }
+            else
+            {
+                currentCommentBody = await GitHubClient.GetCommentBodyAsync(commentIdApiUrl, log);
+            }
+            
+            await GitHubClient.PatchCommentAsync(commentIdApiUrl, currentCommentBody, sb.ToString(), log);
             log.LogInformation("Test scheduled successfully!");
             return new OkObjectResult("Test scheduled successfully!");
         }
@@ -241,10 +260,12 @@ namespace DFTestBot
             }
 
             string runString = "run";
+            string endString = "end";
             int runIndex = input.IndexOf(runString);
+            int endIndex = input.IndexOf(endString);
 
             // if (parts.Length < 2 || !parts[0].Equals("run", StringComparison.OrdinalIgnoreCase))
-            if (parts.Length < 2 || runIndex < 0)
+            if (parts.Length < 2 || runIndex < 0 || endIndex < 0)
             {
                 testName = null;
                 testInfo = null;
@@ -252,7 +273,7 @@ namespace DFTestBot
                 errorMessage = GetSyntaxHelp();
                 return false;
             }
-            parts = input.Substring(runIndex).Split(' ');
+            parts = input.Substring(runIndex, endIndex-runIndex).Split(' ');
             testName = parts[1];
             testParameters = string.Join('&', parts[2..]);
             if (SupportedTests.TryGetTestInfo(testName, out testInfo))

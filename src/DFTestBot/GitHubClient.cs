@@ -45,6 +45,33 @@ namespace DFTestBot
             HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         }
 
+        public static async Task<string> GetCommentBodyAsync(
+            Uri commentIdApiUrl,
+            ILogger log)
+        {
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, commentIdApiUrl);
+                
+            using HttpResponseMessage response = await HttpClient.SendAsync(request);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                await RefreshAccessToken();
+                await GetCommentBodyAsync(commentIdApiUrl, log);
+            }
+            else if (!response.IsSuccessStatusCode)
+            {
+                int statusCode = (int)response.StatusCode;
+                string details = await response.Content.ReadAsStringAsync();
+                throw new Exception($"Failed to post comment: {statusCode}: {details}");
+            }
+
+            string json = await response.Content.ReadAsStringAsync();
+            JObject jObject = JObject.Parse(json);
+            string body = (string)jObject["body"];
+            return body;
+        }
+
         public static async Task PostCommentAsync(
             Uri commentApiUrl,
             string markdownComment,
@@ -77,7 +104,41 @@ namespace DFTestBot
             }
         }
 
-        public static async Task<JObject> GetPullRequestInfoAsync(Uri pullRequestApiUrl)
+        public static async Task PatchCommentAsync(
+            Uri patchApiUrl,
+            string currentCommentBody,
+            string markdownComment,
+            ILogger log)
+        {
+            string message = currentCommentBody + Environment.NewLine + Environment.NewLine;
+            message += "🤖**Durable Functions Test Bot**🤖" + Environment.NewLine + Environment.NewLine + markdownComment;
+            log.LogInformation($"Sending GitHub comment: {message}");
+
+            if (!GitHubCommentsDisabled)
+            {
+                var newCommentPayload = new { body = message };
+                using var request = new HttpRequestMessage(HttpMethod.Patch, patchApiUrl)
+                {
+                    Content = new StringContent(JsonConvert.SerializeObject(newCommentPayload), Encoding.UTF8, "application/json"),
+                };
+
+                using HttpResponseMessage response = await HttpClient.SendAsync(request);
+
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    await RefreshAccessToken();
+                    await PatchCommentAsync(patchApiUrl, currentCommentBody, markdownComment, log);
+                }
+                else if (!response.IsSuccessStatusCode)
+                {
+                    int statusCode = (int)response.StatusCode;
+                    string details = await response.Content.ReadAsStringAsync();
+                    throw new Exception($"Failed to post comment: {statusCode}: {details}");
+                }
+            }
+        }
+
+            public static async Task<JObject> GetPullRequestInfoAsync(Uri pullRequestApiUrl)
         {
             using HttpResponseMessage response = await HttpClient.GetAsync(pullRequestApiUrl);
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)

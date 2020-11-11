@@ -63,6 +63,18 @@ namespace DFTestBot
         public Uri GitHubCommentApiUrl { get; set; }
 
         /// <summary>
+        /// Gets or sets the GitHub pull request comment API URL e.g. https://api.github.com/repos/bachuv/azure-functions-durable-extension/issues/comments/724391328.
+        /// </summary>
+        [JsonProperty("gitHubCommentIdApiUrl")]
+        public Uri GitHubCommentIdApiUrl { get; set; }
+
+        /// <summary>
+        /// Gets or sets the GitHub comment action e.g "created" or "edited"
+        /// </summary>
+        [JsonProperty("gitHubCommentAction")]
+        public string GitHubCommentAction { get; set; }
+
+        /// <summary>
         /// Gets or sets the GitHub branch to build e.g. "cgillum/perf-testing"
         /// </summary>
         [JsonProperty("branchName")]
